@@ -1,0 +1,10 @@
+{
+  "name": "Digital Flower Portal",
+  "description": "An elegant portal to customize personalized virtual flowers with ambient lo-fi synthesizer arpeggios, custom messages, and voice memos.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
