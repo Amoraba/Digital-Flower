@@ -66,43 +66,83 @@ export const FLOWER_COLORS: Record<ColorType, { primary: string; secondary: stri
 // Curated internal music options metadata
 export const MUSIC_LIBRARY: MusicCategory[] = [
   {
-    id: "FurElise",
-    name: "Für Elise",
+    id: "Perfect",
+    name: "Perfect — Ed Sheeran",
     tracks: [
-      { id: "beethoven_sine", title: "Pure Sine Bloom", description: "Lyrical ambient tone" },
-      { id: "beethoven_retro", title: "Retro Triangle", description: "Soft vintage arpeggiation" },
+      { id: "perfect_sine", title: "Dreamy Plucks", description: "Soft acoustic melody" },
+      { id: "perfect_retro", title: "Retro Ambient", description: "Lo-fi synth rhythm" },
     ],
   },
   {
-    id: "CanonInD",
-    name: "Canon in D",
+    id: "AllOfMe",
+    name: "All of Me — John Legend",
     tracks: [
-      { id: "pachelbel_sine", title: "Dreamy Plucks", description: "Warm, universally loved harmony" },
-      { id: "pachelbel_retro", title: "Soft Glockenspiel", description: "Chippy celebratory bells" },
+      { id: "allofme_sine", title: "Piano Plucks", description: "Warm emotional chords" },
+      { id: "allofme_retro", title: "Mellow Synth", description: "Vintage ambient chord pattern" },
     ],
   },
   {
-    id: "MinuetInG",
-    name: "Minuet in G",
+    id: "CantHelp",
+    name: "Can't Help Falling in Love — Elvis Presley",
     tracks: [
-      { id: "bach_sine", title: "Baroque Flute", description: "Bright and cheerful Counterpoint" },
-      { id: "bach_retro", title: "Chamber Music", description: "Upbeat vintage chords" },
+      { id: "canthelp_sine", title: "Classic Plucks", description: "Romantic soft vibe" },
+      { id: "canthelp_retro", title: "Vintage Warmth", description: "Lyrical vintage keys" },
     ],
   },
   {
-    id: "EineKleine",
-    name: "Nachtmusik",
+    id: "ThousandYears",
+    name: "A Thousand Years — Christina Perri",
     tracks: [
-      { id: "mozart_sine", title: "Mozart Serenade", description: "Lively and sparkling symphonic tune" },
-      { id: "mozart_retro", title: "Symphonic Waves", description: "Bright triangle wave rocket" },
+      { id: "thousand_sine", title: "Celestial Arpeggio", description: "Dreamy modern tempo" },
+      { id: "thousand_retro", title: "Cozy Chimes", description: "Retro bell atmosphere" },
     ],
   },
   {
-    id: "ClairDeLune",
-    name: "Clair de Lune",
+    id: "JustTheWay",
+    name: "Just the Way You Are — Bruno Mars",
     tracks: [
-      { id: "debussy_sine", title: "Serene Moonrise", description: "Slow, peaceful impressionist space" },
-      { id: "debussy_retro", title: "Atmospheric Pads", description: "Ethereal soothing waves" },
+      { id: "justtheway_sine", title: "Happy Plucks", description: "Lively, upbeat tone" },
+      { id: "justtheway_retro", title: "Retro Chords", description: "Playful retro wave" },
+    ],
+  },
+  {
+    id: "FeelMyLove",
+    name: "Make You Feel My Love — Adele",
+    tracks: [
+      { id: "feelmylove_sine", title: "Tender Lofi", description: "Warm, slow progression" },
+      { id: "feelmylove_retro", title: "Retro Twilight", description: "Soft analog chords" },
+    ],
+  },
+  {
+    id: "ThinkingOutLoud",
+    name: "Thinking Out Loud — Ed Sheeran",
+    tracks: [
+      { id: "thinking_sine", title: "Soulful Plucks", description: "Ethereal acoustic arpeggios" },
+      { id: "thinking_retro", title: "Cozy Vintage", description: "Warm analog rhythm" },
+    ],
+  },
+  {
+    id: "UntilIFoundYou",
+    name: "Until I Found You — Stephen Sanchez",
+    tracks: [
+      { id: "until_sine", title: "Dreamy Ballad", description: "Slow 50s-style plucks" },
+      { id: "until_retro", title: "Vintage Cassette", description: "Atmospheric detuned synth" },
+    ],
+  },
+  {
+    id: "LOVE",
+    name: "L-O-V-E — Nat King Cole",
+    tracks: [
+      { id: "love_sine", title: "Upbeat Swing", description: "Bright and cheerful plucks" },
+      { id: "love_retro", title: "Jazzy Chimes", description: "Vintage glockenspiel chords" },
+    ],
+  },
+  {
+    id: "AtLast",
+    name: "At Last — Etta James",
+    tracks: [
+      { id: "atlast_sine", title: "Ethereal Blues", description: "Rich, slow background harmonies" },
+      { id: "atlast_retro", title: "Soft Organ", description: "Vintage warm ambient synth" },
     ],
   },
 ];

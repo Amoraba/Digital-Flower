@@ -60,7 +60,11 @@ export class WebSynthesizer {
     const playStepArr = this.getMelodyPattern(category, track);
 
     // Scheduling loop (every 220ms to 520ms based on song)
-    const stepDuration = category === "EineKleine" ? 220 : category === "ClairDeLune" ? 520 : 340;
+    const stepDuration = (category === "EineKleine" || category === "JustTheWay" || category === "AtLast")
+      ? 220
+      : (category === "ClairDeLune" || category === "CantHelp" || category === "UntilIFoundYou")
+      ? 520
+      : 340;
 
     const playNote = (frequency: number, duration: number, type: OscillatorType = "sine", volumeCoeff = 1) => {
       if (!this.ctx || !this.isPlaying) return;
@@ -144,6 +148,8 @@ export class WebSynthesizer {
     };
 
     switch (category) {
+      case "Perfect":
+      case "FeelMyLove":
       case "FurElise":
         return [
           { bass: notes.A2, treble: [notes.E5] },
@@ -164,6 +170,8 @@ export class WebSynthesizer {
           { treble: [notes.B3] },
         ];
 
+      case "AllOfMe":
+      case "ThinkingOutLoud":
       case "CanonInD":
         return [
           { bass: notes.D2, treble: [notes["F#4"]] },
@@ -200,6 +208,8 @@ export class WebSynthesizer {
           { treble: [notes.A4] },
         ];
 
+      case "LOVE":
+      case "ThousandYears":
       case "MinuetInG":
         return [
           { bass: notes.G2, treble: [notes.D5] },
@@ -220,6 +230,8 @@ export class WebSynthesizer {
           { treble: [notes["F#4"]] },
         ];
 
+      case "JustTheWay":
+      case "AtLast":
       case "EineKleine":
         return [
           { bass: notes.G2, treble: [notes.G4] },
@@ -240,6 +252,8 @@ export class WebSynthesizer {
           { treble: [notes.C5] },
         ];
 
+      case "CantHelp":
+      case "UntilIFoundYou":
       case "ClairDeLune":
       default:
         return [

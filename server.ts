@@ -66,6 +66,11 @@ async function startServer() {
     res.redirect(`/?giftId=${req.params.id}`);
   });
 
+  // Short path redirect for compact links
+  app.get("/g/:id", (req, res) => {
+    res.redirect(`/?giftId=${req.params.id}`);
+  });
+
   // Get a specific flower gift by ID
   app.get("/api/gifts/:id", async (req, res) => {
     const { id } = req.params;
