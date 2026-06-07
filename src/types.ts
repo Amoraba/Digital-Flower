@@ -171,3 +171,31 @@ export const FLOWERS: FlowerType[] = [
 ];
 
 export const COLORS: ColorType[] = ["Red", "Pink", "White", "Yellow", "Blue", "Purple", "Orange"];
+
+export interface AnalyticsEvent {
+  id: string;
+  eventType: "gift_created" | "gift_opened" | "gift_shared";
+  giftId: string;
+  createdAt: string;
+  recipientName?: string;
+  senderName?: string;
+  occasion?: string;
+  flowerType?: string;
+}
+
+export interface AdminMetricsData {
+  metrics: {
+    totalGifts: number;
+    openedGifts: number;
+    topFlower: string;
+    topOccasion: string;
+    voiceNotesSent: number;
+  };
+  events: AnalyticsEvent[];
+  gifts: Gift[];
+  databaseStatus: {
+    isSupabaseConfigured: boolean;
+    loadedFromSupabase: boolean;
+  };
+}
+

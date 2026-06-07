@@ -45,6 +45,28 @@ function mapRowToGift(row: any): Gift {
   };
 }
 
+interface AnalyticsEvent {
+  id: string;
+  eventType: "gift_created" | "gift_opened" | "gift_shared";
+  giftId: string;
+  createdAt: string;
+}
+
+const ANALYTICS_FILE = path.join(process.cwd(), "analytics_db.json");
+
+async function readLocalAnalytics(): Promise<AnalyticsEvent[]> {
+  try {
+    const data = await fs.readFile(ANALYTICS_FILE, "utf-8");
+    return JSON.parse(data);
+  } catch (e) {
+    return [];
+  }
+}
+
+async function writeLocalAnalytics(events: AnalyticsEvent[]) {
+  await fs.writeFile(ANALYTICS_FILE, JSON.stringify(events, null, 2), "utf-8");
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -225,11 +247,220 @@ async function startServer() {
   // Execute check-migrator
   await migrateGiftsToSupabase();
 
+  // Unified Multi-Persistence Analytics System
+  async function logAnalyticsEvent(eventType: "gift_created" | "gift_opened" | "gift_shared", giftId: string): Promise<void> {
+    const event: AnalyticsEvent = {
+      id: Math.random().toString(36).substring(2, 10),
+      eventType,
+      giftId,
+      createdAt: new Date().toISOString()
+    };
+
+    const client = initSupabase();
+    let loggedToSupabase = false;
+
+    if (isSupabaseConfigured && client) {
+      try {
+        const row = {
+          id: event.id,
+          event_type: event.eventType,
+          gift_id: event.giftId,
+          created_at: event.createdAt
+        };
+        const { error } = await client.from("gift_analytics").insert(row);
+        if (error) {
+          console.warn("[Supabase Analytics Warning] Failed to insert to gift_analytics table (likely missing schema). Falling back to JSON DB:", error.message);
+        } else {
+          loggedToSupabase = true;
+          console.log(`[Supabase Analytics] Successfully tracked event '${eventType}' for gift ID ${giftId}`);
+        }
+      } catch (err: any) {
+        console.warn("[Supabase Analytics Exception] Skipped remote tracking, falling back to local files:", err?.message || err);
+      }
+    }
+
+    // Always keep local JSON DB in sync for fully working fallbacks
+    try {
+      const events = await readLocalAnalytics();
+      events.push(event);
+      await writeLocalAnalytics(events);
+      console.log(`[Local Analytics] Logged '${eventType}' for gift ${giftId}`);
+    } catch (localErr: any) {
+      console.error("[Local Analytics Fail] Unable to append local log event:", localErr?.message);
+    }
+  }
+
+  // Admin Dashboard Statistics Processor
+  async function getAdminMetrics() {
+    let allGifts: Gift[] = [];
+    let allEvents: AnalyticsEvent[] = [];
+    
+    const client = initSupabase();
+    let loadedFromSupabase = false;
+
+    if (isSupabaseConfigured && client) {
+      try {
+        const { data: giftsData, error: giftsError } = await client.from("gifts").select("*");
+        const { data: eventsData, error: eventsError } = await client.from("gift_analytics").select("*");
+
+        if (giftsError) {
+          console.warn("[Supabase Admin Fallback] Could not select gifts table:", giftsError.message);
+        } else if (giftsData) {
+          allGifts = giftsData.map(mapRowToGift);
+          loadedFromSupabase = true;
+        }
+
+        if (eventsError) {
+          console.warn("[Supabase Admin Fallback] Could not select gift_analytics table:", eventsError.message);
+        } else if (eventsData) {
+          allEvents = eventsData.map((row: any) => ({
+            id: row.id,
+            eventType: (row.event_type || row.eventType || "gift_created") as any,
+            giftId: row.gift_id || row.giftId || "",
+            createdAt: row.created_at || row.createdAt || new Date().toISOString()
+          }));
+        }
+      } catch (err: any) {
+        console.warn("[Supabase Admin Metrics Exception] Querying metrics through local fallback. Error:", err?.message || err);
+      }
+    }
+
+    // Load backup local datasets
+    const localStoreMap = await readLocalGifts();
+    const localGifts = Object.values(localStoreMap);
+    const localEvents = await readLocalAnalytics();
+
+    // Splicing datasets beautifully - merge local & remote uniquely so we do not lose local counts
+    if (!loadedFromSupabase) {
+      allGifts = localGifts;
+    } else {
+      const dbIds = new Set(allGifts.map(g => g.id));
+      localGifts.forEach(g => {
+        if (!dbIds.has(g.id)) allGifts.push(g);
+      });
+    }
+
+    // merge events uniquely
+    if (allEvents.length === 0) {
+      allEvents = localEvents;
+    } else {
+      const evIds = new Set(allEvents.map(e => e.id));
+      localEvents.forEach(e => {
+        if (!evIds.has(e.id)) allEvents.push(e);
+      });
+    }
+
+    // Computing dashboard deliverables
+    const totalGifts = allGifts.length;
+
+    // Opened Gifts count: unique giftId that experienced a 'gift_opened' event
+    const openedGiftIds = new Set(
+      allEvents
+        .filter(e => e.eventType === "gift_opened")
+        .map(e => e.giftId)
+    );
+    const openedGiftsCount = openedGiftIds.size;
+
+    // Top Flower Choice
+    const flowerMap: Record<string, number> = {};
+    allGifts.forEach(g => {
+      const fl = g.flowerType || "Unknown";
+      flowerMap[fl] = (flowerMap[fl] || 0) + 1;
+    });
+    let topFlower = "None";
+    let topFlowerCount = 0;
+    Object.entries(flowerMap).forEach(([flower, count]) => {
+      if (count > topFlowerCount) {
+        topFlower = flower;
+        topFlowerCount = count;
+      }
+    });
+
+    // Top Occasion
+    const occasionMap: Record<string, number> = {};
+    allGifts.forEach(g => {
+      const oc = g.occasion || "Unknown";
+      occasionMap[oc] = (occasionMap[oc] || 0) + 1;
+    });
+    let topOccasion = "None";
+    let topOccasionCount = 0;
+    Object.entries(occasionMap).forEach(([occ, count]) => {
+      if (count > topOccasionCount) {
+        topOccasion = occ;
+        topOccasionCount = count;
+      }
+    });
+
+    // Voice Notes count: check how many gifts contain either a sound file base64 or a link
+    const voiceNotesSent = allGifts.filter(g => g.voiceNoteBase64 && g.voiceNoteBase64.length > 20).length;
+
+    // Build the analytics events log table with enriched gift data
+    const giftsMap = new Map(allGifts.map(g => [g.id, g]));
+    const eventsTableData = allEvents.map(e => {
+      const matchingGift = giftsMap.get(e.giftId);
+      return {
+        id: e.id,
+        eventType: e.eventType,
+        giftId: e.giftId,
+        createdAt: e.createdAt,
+        recipientName: matchingGift ? matchingGift.recipientName : "Unknown",
+        senderName: matchingGift ? (matchingGift.senderName || "Someone Special") : "Someone Special",
+        occasion: matchingGift ? matchingGift.occasion : "Unknown",
+        flowerType: matchingGift ? matchingGift.flowerType : "Unknown"
+      };
+    }).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+    return {
+      metrics: {
+        totalGifts,
+        openedGifts: openedGiftsCount,
+        topFlower: topFlowerCount > 0 ? `${topFlower} (${topFlowerCount})` : "None",
+        topOccasion: topOccasionCount > 0 ? `${topOccasion} (${topOccasionCount})` : "None",
+        voiceNotesSent
+      },
+      events: eventsTableData,
+      gifts: allGifts.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()),
+      databaseStatus: {
+        isSupabaseConfigured,
+        loadedFromSupabase
+      }
+    };
+  }
+
 
   // --- RESTful Api Routes ---
 
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", time: new Date().toISOString() });
+  });
+
+  // Log client analytics events manually (e.g., share events)
+  app.post("/api/analytics", async (req, res) => {
+    try {
+      const { eventType, giftId } = req.body;
+      if (!eventType || !giftId) {
+        return res.status(400).json({ error: "eventType and giftId are required." });
+      }
+
+      if (eventType !== "gift_created" && eventType !== "gift_opened" && eventType !== "gift_shared") {
+        return res.status(400).json({ error: "Invalid eventType value." });
+      }
+
+      await logAnalyticsEvent(eventType, giftId);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Unable to log analytic event." });
+    }
+  });
+
+  // Admin Metrics API Access point
+  app.get("/api/admin/metrics", async (req, res) => {
+    try {
+      const metricsData = await getAdminMetrics();
+      res.json(metricsData);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || "Failed to compile admin metrics dashboard." });
+    }
   });
 
   // Solve Vite dev server 404s by redirecting nested routes to root page with query parameters
@@ -249,6 +480,12 @@ async function startServer() {
 
     if (!gift) {
       return res.status(404).json({ error: "Flower gift does not exist or has expired." });
+    }
+
+    try {
+      await logAnalyticsEvent("gift_opened", id);
+    } catch (e) {
+      console.warn("[Analytics Error] Could not auto-log gift open event for", id);
     }
 
     res.json(gift);
@@ -274,6 +511,12 @@ async function startServer() {
       };
 
       await saveGift(newGift);
+
+      try {
+        await logAnalyticsEvent("gift_created", id);
+      } catch (e) {
+        console.warn("[Analytics Error] Could not auto-log gift create event for", id);
+      }
 
       res.status(200).json(newGift);
     } catch (err: any) {

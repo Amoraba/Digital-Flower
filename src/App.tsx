@@ -45,6 +45,7 @@ import {
 import FlowerRenderer from "./components/FlowerRenderer";
 import { globalSynthesizer } from "./lib/WebSynthesizer";
 import GiftRevealBox from "./components/GiftRevealBox";
+import AdminDashboard from "./components/AdminDashboard";
 
 const base64ToBlobUrl = (base64DataUrl: string): string => {
   try {
@@ -80,8 +81,8 @@ const SONG_SEARCH_QUERIES: Record<string, string> = {
 
 export default function App() {
   // Navigation & View States
-  // 'intro' | 'create' | 'preview' | 'share' | 'recipient'
-  const [view, setView] = useState<"intro" | "create" | "preview" | "share" | "recipient">("intro");
+  // 'intro' | 'create' | 'preview' | 'share' | 'recipient' | 'admin'
+  const [view, setView] = useState<"intro" | "create" | "preview" | "share" | "recipient" | "admin">("intro");
   const [giftId, setGiftId] = useState<string>("");
   const [recipientGift, setRecipientGift] = useState<Gift | null>(null);
   const [isLoadingGift, setIsLoadingGift] = useState<boolean>(false);
@@ -521,6 +522,19 @@ export default function App() {
     setView("create");
   };
 
+  const trackShareEvent = async () => {
+    if (!giftId) return;
+    try {
+      await fetch("/api/analytics", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ eventType: "gift_shared", giftId }),
+      });
+    } catch (e) {
+      // ignore track failures as silent analytics fallbacks
+    }
+  };
+
   // Copy share link helper
   const getGiftLink = () => {
     if (shortUrlStyle) {
@@ -533,12 +547,14 @@ export default function App() {
     navigator.clipboard.writeText(getGiftLink());
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+    trackShareEvent();
   };
 
   const handleCopyFullMessage = () => {
     navigator.clipboard.writeText(customShareMsg);
     setCopiedMessage(true);
     setTimeout(() => setCopiedMessage(false), 2000);
+    trackShareEvent();
   };
 
   const handleShare = (medium: "whatsapp" | "messenger" | "email" | "sms") => {
@@ -563,6 +579,7 @@ export default function App() {
         break;
     }
 
+    trackShareEvent();
     window.open(finalUrl, "_blank");
   };
 
@@ -679,6 +696,19 @@ export default function App() {
 
         {!isLoadingGift && !errorMessage && (
           <AnimatePresence mode="wait">
+            {/* ADMIN DASHBOARD VIEW */}
+            {view === "admin" && (
+              <motion.div
+                key="admin"
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                className="w-full"
+              >
+                <AdminDashboard onBack={() => setView("intro")} />
+              </motion.div>
+            )}
+
             {/* INTRO LANDING MODULE */}
             {view === "intro" && (
               <motion.div
@@ -1608,7 +1638,14 @@ export default function App() {
       <footer className="bg-white border-t border-slate-100 py-6 text-center text-xs text-slate-400">
         <div className="max-w-4xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-4">
           <p>© 2026 Digital Flowers Portal. Sending warm affection instantly worldwide.</p>
-          <div className="flex space-x-4">
+          <div className="flex items-center space-x-4">
+            <button
+              onClick={() => setView(view === "admin" ? "intro" : "admin")}
+              className="text-[10px] bg-slate-50 hover:bg-slate-100 text-slate-500 hover:text-rose-600 font-semibold px-2 py-1 rounded transition-colors cursor-pointer border border-slate-200 shadow-sm"
+              id="admin-footer-toggle-btn"
+            >
+              📊 Stats Dashboard
+            </button>
             <span className="text-[10px] select-all font-mono">Egypt Delivery channels online</span>
           </div>
         </div>
