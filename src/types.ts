@@ -1,5 +1,6 @@
 export type OccasionType =
   | "Love"
+  | "Apology"
   | "Birthday"
   | "Congratulations"
   | "Thank You"
@@ -149,6 +150,7 @@ export const MUSIC_LIBRARY: MusicCategory[] = [
 
 export const OCCASIONS: OccasionType[] = [
   "Love",
+  "Apology",
   "Birthday",
   "Congratulations",
   "Thank You",

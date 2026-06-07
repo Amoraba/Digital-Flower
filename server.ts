@@ -3,6 +3,7 @@ import path from "path";
 import { promises as fs } from "fs";
 import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
+import { createClient } from "@supabase/supabase-js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,6 +26,25 @@ interface Gift {
   status: "pending" | "paid";
 }
 
+// Map database columns (including custom snake_case columns) to camelCase types back & forth
+function mapRowToGift(row: any): Gift {
+  return {
+    id: row.id,
+    occasion: row.occasion,
+    flowerType: row.flower_type || row.flowerType || "",
+    flowerColor: row.flower_color || row.flowerColor || "",
+    recipientName: row.recipient_name || row.recipientName || "",
+    senderName: row.sender_name || row.senderName || undefined,
+    personalMessage: row.personal_message || row.personalMessage || "",
+    voiceNoteBase64: row.voice_note_base64 || row.voiceNoteBase64 || undefined,
+    musicCategory: row.music_category || row.musicCategory || "",
+    musicTrack: row.music_track || row.musicTrack || "",
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    status: (row.status || "paid") as "pending" | "paid",
+    paymentMethod: row.payment_method || row.paymentMethod || undefined,
+  };
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -33,8 +53,44 @@ async function startServer() {
   app.use(express.json({ limit: "15mb" }));
   app.use(express.urlencoded({ limit: "15mb", extended: true }));
 
-  // Helper file reading
-  async function readGifts(): Promise<Record<string, Gift>> {
+  // Supabase Lazy Initialization Loader
+  let supabaseClient: any = null;
+  let isSupabaseConfigured = false;
+
+  function initSupabase() {
+    if (supabaseClient) return supabaseClient;
+
+    const url = process.env.SUPABASE_URL?.trim();
+    const key = (process.env.SUPABASE_SERVICE_KEY || process.env.SUPABASE_ANON_KEY)?.trim();
+
+    if (url && key && url.startsWith("http") && !url.includes("placeholder")) {
+      try {
+        supabaseClient = createClient(url, key, {
+          auth: {
+            persistSession: false,
+          },
+        });
+        isSupabaseConfigured = true;
+        console.log("[Supabase Server] Connected securely dynamically.");
+      } catch (err: any) {
+        console.error("[Supabase Server] Connection initialization error:", err?.message || err);
+        isSupabaseConfigured = false;
+        supabaseClient = null;
+      }
+    } else {
+      if (url || key) {
+        console.log(
+          "[Supabase Info] Supabase credentials in environment are incomplete or placeholder values. " +
+          "Using local filesystem fallback (gifts_db.json)."
+        );
+      }
+      isSupabaseConfigured = false;
+    }
+    return supabaseClient;
+  }
+
+  // Local filesystem persistence helper (as a backup mechanism)
+  async function readLocalGifts(): Promise<Record<string, Gift>> {
     try {
       const data = await fs.readFile(GIFTS_FILE, "utf-8");
       return JSON.parse(data);
@@ -43,17 +99,132 @@ async function startServer() {
     }
   }
 
-  // Helper file writing
-  async function writeGifts(gifts: Record<string, Gift>) {
+  async function writeLocalGifts(gifts: Record<string, Gift>) {
     await fs.writeFile(GIFTS_FILE, JSON.stringify(gifts, null, 2), "utf-8");
   }
 
-  // Init check for gifts json
-  try {
-    await readGifts();
-  } catch (e) {
-    await writeGifts({});
+  // Core Data Retrieval Endpoint Handler
+  async function getGiftById(id: string): Promise<Gift | null> {
+    const client = initSupabase();
+    if (isSupabaseConfigured && client) {
+      try {
+        const { data, error } = await client
+          .from("gifts")
+          .select("*")
+          .eq("id", id)
+          .maybeSingle();
+
+        if (error) {
+          console.error(`[Supabase Error] getGiftById on ${id} triggered db error:`, error.message);
+          throw error;
+        }
+        if (data) {
+          return mapRowToGift(data);
+        }
+      } catch (err) {
+        console.warn(`[Supabase Fallback] getGiftById failed with exception, querying gifts_db.json fallback. Clean error:`, err);
+      }
+    }
+
+    // fallback to JSON db
+    const localStore = await readLocalGifts();
+    return localStore[id] || null;
   }
+
+  // Core Data Writing Endpoint Handler
+  async function saveGift(gift: Gift): Promise<void> {
+    const client = initSupabase();
+    if (isSupabaseConfigured && client) {
+      try {
+        const row = {
+          id: gift.id,
+          occasion: gift.occasion,
+          flower_type: gift.flowerType,
+          flower_color: gift.flowerColor,
+          recipient_name: gift.recipientName,
+          sender_name: gift.senderName || null,
+          personal_message: gift.personalMessage,
+          voice_note_base64: gift.voiceNoteBase64 || null,
+          music_category: gift.musicCategory,
+          music_track: gift.musicTrack,
+          status: gift.status,
+          created_at: gift.createdAt,
+          payment_method: gift.paymentMethod || null,
+        };
+
+        const { error } = await client
+          .from("gifts")
+          .upsert(row, { onConflict: "id" });
+
+        if (error) {
+          console.error(`[Supabase Error] saveGift on ${gift.id} triggered db error:`, error.message);
+          throw error;
+        }
+        console.log(`[Supabase Server] Successfully upserted gift item ${gift.id} to gifts table.`);
+        return;
+      } catch (err) {
+        console.warn(`[Supabase Fallback] saveGift failed with exception, syncing to gifts_db.json fallback instead. Clean error:`, err);
+      }
+    }
+
+    // fallback to JSON db
+    const localStore = await readLocalGifts();
+    localStore[gift.id] = gift;
+    await writeLocalGifts(localStore);
+  }
+
+  // One-time auto migration of local gift data to Supabase if it's set up
+  async function migrateGiftsToSupabase() {
+    const client = initSupabase();
+    if (!isSupabaseConfigured || !client) return;
+
+    try {
+      const localGifts = await readLocalGifts();
+      const ids = Object.keys(localGifts);
+      if (ids.length === 0) return;
+
+      console.log(`[Supabase Migration] Syncing local files to server: detected ${ids.length} entries to migrate.`);
+      for (const id of ids) {
+        const gift = localGifts[id];
+        const row = {
+          id: gift.id,
+          occasion: gift.occasion,
+          flower_type: gift.flowerType,
+          flower_color: gift.flowerColor,
+          recipient_name: gift.recipientName,
+          sender_name: gift.senderName || null,
+          personal_message: gift.personalMessage,
+          voice_note_base64: gift.voiceNoteBase64 || null,
+          music_category: gift.musicCategory,
+          music_track: gift.musicTrack,
+          status: gift.status,
+          created_at: gift.createdAt,
+          payment_method: gift.paymentMethod || null,
+        };
+
+        const { error } = await client.from("gifts").upsert(row, { onConflict: "id" });
+        if (error) {
+          console.warn(`[Supabase Migration API] Error migrating record ${id}:`, error.message);
+        } else {
+          console.log(`[Supabase Migration API] Synced record ID ${id} to remote table.`);
+        }
+      }
+
+      // Rename JSON db file so we do not run migration multiple times
+      try {
+        await fs.rename(GIFTS_FILE, path.join(process.cwd(), "gifts_db.json.migrated_to_supabase"));
+        console.log("[Supabase Migration] local gifts file successfully renamed.");
+      } catch (e) {
+        // Safe to bypass if rename encounters systems permissions issue
+      }
+    } catch (err) {
+      console.error("[Supabase Migration Warning] Auto-migration pipeline skipped:", err);
+    }
+  }
+
+  // Execute check-migrator
+  await migrateGiftsToSupabase();
+
 
   // --- RESTful Api Routes ---
 
@@ -74,8 +245,7 @@ async function startServer() {
   // Get a specific flower gift by ID
   app.get("/api/gifts/:id", async (req, res) => {
     const { id } = req.params;
-    const gifts = await readGifts();
-    const gift = gifts[id];
+    const gift = await getGiftById(id);
 
     if (!gift) {
       return res.status(404).json({ error: "Flower gift does not exist or has expired." });
@@ -95,7 +265,6 @@ async function startServer() {
 
       // Generate elegant unique 8 character hex-token
       const id = Math.random().toString(36).substring(2, 6) + Math.random().toString(36).substring(2, 6);
-      const gifts = await readGifts();
 
       const newGift: Gift = {
         ...giftData,
@@ -104,8 +273,7 @@ async function startServer() {
         createdAt: new Date().toISOString(),
       };
 
-      gifts[id] = newGift;
-      await writeGifts(gifts);
+      await saveGift(newGift);
 
       res.status(200).json(newGift);
     } catch (err: any) {
@@ -123,8 +291,7 @@ async function startServer() {
         return res.status(400).json({ error: " Egyptian cash / wallet credentials required to activate gift." });
       }
 
-      const gifts = await readGifts();
-      const gift = gifts[id];
+      const gift = await getGiftById(id);
 
       if (!gift) {
         return res.status(404).json({ error: "Selected gift draft has expired or expired." });
@@ -132,8 +299,7 @@ async function startServer() {
 
       gift.status = "paid";
       gift.paymentMethod = paymentMethod;
-      gifts[id] = gift;
-      await writeGifts(gifts);
+      await saveGift(gift);
 
       res.json(gift);
     } catch (err: any) {

@@ -44,6 +44,7 @@ import {
 } from "./types";
 import FlowerRenderer from "./components/FlowerRenderer";
 import { globalSynthesizer } from "./lib/WebSynthesizer";
+import GiftRevealBox from "./components/GiftRevealBox";
 
 const base64ToBlobUrl = (base64DataUrl: string): string => {
   try {
@@ -64,6 +65,19 @@ const base64ToBlobUrl = (base64DataUrl: string): string => {
   }
 };
 
+const SONG_SEARCH_QUERIES: Record<string, string> = {
+  Perfect: "Ed Sheeran Perfect",
+  AllOfMe: "John Legend All of Me",
+  CantHelp: "Elvis Presley Can't Help Falling in Love",
+  ThousandYears: "Christina Perri A Thousand Years",
+  JustTheWay: "Bruno Mars Just the Way You Are",
+  FeelMyLove: "Adele Make You Feel My Love",
+  ThinkingOutLoud: "Ed Sheeran Thinking Out Loud",
+  UntilIFoundYou: "Stephen Sanchez Until I Found You",
+  LOVE: "Nat King Cole Love",
+  AtLast: "Etta James At Last",
+};
+
 export default function App() {
   // Navigation & View States
   // 'intro' | 'create' | 'preview' | 'share' | 'recipient'
@@ -73,6 +87,25 @@ export default function App() {
   const [isLoadingGift, setIsLoadingGift] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [notification, setNotification] = useState<{ message: string; type: "error" | "success" | "info" } | null>(null);
+
+  // Real Song Preview states
+  const [songPreviewUrl, setSongPreviewUrl] = useState<string>("");
+  const [isLoadingSong, setIsLoadingSong] = useState<boolean>(false);
+  const songAudioElementRef = useRef<HTMLAudioElement | null>(null);
+
+  // Initialize background vocal/song player on the client
+  useEffect(() => {
+    songAudioElementRef.current = new Audio();
+    songAudioElementRef.current.loop = true;
+    songAudioElementRef.current.volume = 0.5; // Medium romantic feel-good background volume
+
+    return () => {
+      if (songAudioElementRef.current) {
+        songAudioElementRef.current.pause();
+        songAudioElementRef.current = null;
+      }
+    };
+  }, []);
 
   const showNotification = (message: string, type: "error" | "success" | "info" = "error") => {
     setNotification({ message, type });
@@ -180,6 +213,65 @@ export default function App() {
     }
   }, [musicCategory]);
 
+  // Synchronously fetch real recorded song preview with vocals from iTunes API (fully CORS-safe)
+  useEffect(() => {
+    let active = true;
+    const query = SONG_SEARCH_QUERIES[musicCategory];
+    if (!query) return;
+
+    const loadRealAudioCover = async () => {
+      setIsLoadingSong(true);
+      try {
+        const searchUrl = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=song&limit=1`;
+        const res = await fetch(searchUrl);
+        if (res.ok) {
+          const data = await res.json();
+          if (active && data.results && data.results[0]?.previewUrl) {
+            setSongPreviewUrl(data.results[0].previewUrl);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading real vocal track cover preview from iTunes API:", err);
+      } finally {
+        if (active) {
+          setIsLoadingSong(false);
+        }
+      }
+    };
+
+    loadRealAudioCover();
+    return () => {
+      active = false;
+    };
+  }, [musicCategory]);
+
+  // Synchronize actual live iTunes song preview player with the UI state
+  useEffect(() => {
+    const audio = songAudioElementRef.current;
+    if (!audio) return;
+
+    if (isMusicPlaying && songPreviewUrl) {
+      // Pause synthetic fallback generator so we don't double play
+      globalSynthesizer.stop();
+
+      // If the source has changed, set the new URL and play
+      if (audio.src !== songPreviewUrl) {
+        audio.src = songPreviewUrl;
+        audio.load();
+      }
+      
+      audio.play().catch((err) => {
+        console.warn("Real vocals autoplay prevented by browser or audio failed to load: ", err);
+      });
+    } else {
+      audio.pause();
+    }
+    
+    return () => {
+      audio.pause();
+    };
+  }, [isMusicPlaying, songPreviewUrl]);
+
   // Synchronize custom sharing message when names or link style change
   useEffect(() => {
     if (giftId) {
@@ -187,22 +279,10 @@ export default function App() {
         ? `${window.location.origin}/g/${giftId}`
         : `${window.location.origin}/gift/${giftId}`;
       const nameTag = senderName ? `from ${senderName}` : "from a special friend";
-      const defaultText = `🌸 Hey ${recipientName || 'there'}! You've received a virtual flower gift ${nameTag}! Note: This card is active and can only be opened within a limited time window, so check it out before it expires: ${link}`;
+      const defaultText = `💝 ${senderName ? `${senderName} sent you a gift` : 'someone sent you a gift'}... it's only valid for a limited time check it now: ${link}`;
       setCustomShareMsg(defaultText);
     }
   }, [giftId, recipientName, senderName, shortUrlStyle]);
-
-  // Sync music state
-  useEffect(() => {
-    if (isMusicPlaying) {
-      globalSynthesizer.play(musicCategory, musicTrack);
-    } else {
-      globalSynthesizer.stop();
-    }
-    return () => {
-      globalSynthesizer.stop();
-    };
-  }, [isMusicPlaying, musicCategory, musicTrack]);
 
   // Voice player progress interval
   useEffect(() => {
@@ -506,6 +586,7 @@ export default function App() {
                     setView("preview");
                   } else if (view === "recipient") {
                     globalSynthesizer.stop();
+                    setIsMusicPlaying(false);
                     setRecipientGift(null);
                     setGiftId("");
                     window.location.hash = "";
@@ -869,6 +950,32 @@ export default function App() {
                         className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-2xl px-3 py-2 text-xs focus:ring-2 focus:ring-rose-400 focus:outline-none resize-none leading-relaxed"
                         id="personal-message-input"
                       />
+
+                      {occasion === "Apology" && (
+                        <div className="space-y-1.5 mt-2.5">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">💡 Tap to load an apology message template:</span>
+                          <div className="grid grid-cols-1 gap-1.5">
+                            {[
+                              "I'm so sorry. I hope these beautiful virtual flowers can bring a gentle smile back to your face. Let's talk.",
+                              "Please accept my deepest, most sincere apology. You mean absolute worlds to me.",
+                              "I messed up, and I'm truly sorry. Hopefully these blooming flowers can brighten your day even just a little.",
+                              "Sincerest apologies. I value our relationship tremendously and want to set things right."
+                            ].map((preset, index) => {
+                              return (
+                                <button
+                                  key={index}
+                                  type="button"
+                                  onClick={() => setPersonalMessage(preset)}
+                                  className="text-[10px] bg-slate-100 hover:bg-rose-50 text-slate-700 hover:text-rose-800 font-medium px-2.5 py-1.5 rounded-xl border border-slate-200 hover:border-rose-300 transition-all text-left block w-full truncate"
+                                  title={preset}
+                                >
+                                  💬 "{preset}"
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1354,30 +1461,16 @@ export default function App() {
                   {/* Music play notice button overlay banner */}
                   {!isMusicPlaying && (
                     <motion.div
-                      initial={{ y: -20, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      className="absolute inset-0 bg-slate-950/95 backdrop-blur-md z-30 flex flex-col items-center justify-center p-8 text-center"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="absolute inset-0 bg-slate-950/98 backdrop-blur-xl z-30 flex flex-col items-center justify-center p-6 text-center"
                     >
-                      <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 mb-6 animate-pulse">
-                        <GiftIcon className="w-8 h-8" />
-                      </div>
-                      <h3 className="text-2xl font-serif font-bold text-white mb-2">
-                        You've received a flower gift!
-                      </h3>
-                      <p className="text-xs text-slate-400 max-w-xs leading-relaxed mb-8">
-                        {recipientGift.senderName} sent you a beautiful personalized dynamic flower with soothing audio loops. Click to enjoy.
-                      </p>
-                      
-                      <button
-                        onClick={() => {
+                      <GiftRevealBox
+                        senderNameName={recipientGift.senderName}
+                        onOpenComplete={() => {
                           setIsMusicPlaying(true);
                         }}
-                        className="bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-600 hover:to-pink-700 text-white font-serif font-bold px-8 py-3.5 rounded-2xl shadow-lg shadow-rose-500/20 text-base flex items-center space-x-2 transition-all hover:scale-[1.03]"
-                        id="open-gift-btn"
-                      >
-                        <Sparkles className="w-5 h-5" />
-                        <span>Unfold Flower Gift</span>
-                      </button>
+                      />
                     </motion.div>
                   )}
 
@@ -1495,7 +1588,7 @@ export default function App() {
                   </div>
                   <h4 className="text-sm font-serif font-bold text-white">Create a Gift for Someone New</h4>
                   <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
-                    Keep the loop going! Design an elegant virtual flower card matching beautiful ambient melodies with a personal voice note to surprise someone special.
+                    Send your special person a private note... Design an elegant virtual flower card matching beautiful ambient melodies with a personal voice note to surprise them.
                   </p>
                   <button
                     onClick={startNewGiftCreator}
