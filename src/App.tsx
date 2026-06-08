@@ -130,6 +130,7 @@ export default function App() {
 
   // Audio Previews & Synthesis
   const [isMusicPlaying, setIsMusicPlaying] = useState<boolean>(false);
+  const [isGiftOpened, setIsGiftOpened] = useState<boolean>(false);
 
   // Voice Note Recording
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -276,11 +277,14 @@ export default function App() {
   // Synchronize custom sharing message when names or link style change
   useEffect(() => {
     if (giftId) {
+      let origin = window.location.origin;
+      if (origin.includes("ais-dev-")) {
+        origin = origin.replace("ais-dev-", "ais-pre-");
+      }
       const link = shortUrlStyle
-        ? `${window.location.origin}/g/${giftId}`
-        : `${window.location.origin}/gift/${giftId}`;
-      const nameTag = senderName ? `from ${senderName}` : "from a special friend";
-      const defaultText = `💝 ${senderName ? `${senderName} sent you a gift` : 'someone sent you a gift'}... it's only valid for a limited time check it now: ${link}`;
+        ? `${origin}/g/${giftId}`
+        : `${origin}/gift/${giftId}`;
+      const defaultText = `💝 ${senderName ? `${senderName} sent you a gift` : "Someone sent you a gift"}${recipientName ? ` for ${recipientName}` : ""}${recipientName ? "!" : ""} Check it now: ${link}`;
       setCustomShareMsg(defaultText);
     }
   }, [giftId, recipientName, senderName, shortUrlStyle]);
@@ -484,6 +488,17 @@ export default function App() {
       if (res.ok) {
         const result = await res.json();
         setGiftId(result.id);
+        
+        let origin = window.location.origin;
+        if (origin.includes("ais-dev-")) {
+          origin = origin.replace("ais-dev-", "ais-pre-");
+        }
+        const link = shortUrlStyle
+          ? `${origin}/g/${result.id}`
+          : `${origin}/gift/${result.id}`;
+        const defaultText = `💝 ${senderName ? `${senderName} sent you a gift` : "Someone sent you a gift"}${recipientName ? ` for ${recipientName}` : ""}${recipientName ? "!" : ""} Check it now: ${link}`;
+        setCustomShareMsg(defaultText);
+
         setView("share");
         showNotification("Gift bouquet created successfully!", "success");
       } else {
@@ -515,6 +530,7 @@ export default function App() {
     setAudioUrl(null);
     setRecordingDuration(0);
     setIsMusicPlaying(false);
+    setIsGiftOpened(false);
     setIsVoicePlaying(false);
     setVoicePlaybackProgress(0);
     
@@ -537,10 +553,14 @@ export default function App() {
 
   // Copy share link helper
   const getGiftLink = () => {
-    if (shortUrlStyle) {
-      return `${window.location.origin}/g/${giftId}`;
+    let origin = window.location.origin;
+    if (origin.includes("ais-dev-")) {
+      origin = origin.replace("ais-dev-", "ais-pre-");
     }
-    return `${window.location.origin}/gift/${giftId}`;
+    if (shortUrlStyle) {
+      return `${origin}/g/${giftId}`;
+    }
+    return `${origin}/gift/${giftId}`;
   };
 
   const handleCopyLink = () => {
@@ -559,7 +579,14 @@ export default function App() {
 
   const handleShare = (medium: "whatsapp" | "messenger" | "email" | "sms") => {
     const link = getGiftLink();
-    const textMsg = encodeURIComponent(customShareMsg || `🎁 I sent you a personalized interactive Digital Flower gift! Open it here to feel the breeze: ${link}`);
+    
+    // Always guarantee a fully populated beautiful message text
+    let activeMsg = customShareMsg ? customShareMsg.trim() : "";
+    if (!activeMsg) {
+      activeMsg = `💝 ${senderName ? `${senderName} sent you a gift` : "Someone sent you a gift"}${recipientName ? ` for ${recipientName}` : ""}${recipientName ? "!" : ""} Check it now: ${link}`;
+    }
+    
+    const textMsg = encodeURIComponent(activeMsg);
     const shareUrl = encodeURIComponent(link);
 
     let finalUrl = "";
@@ -571,7 +598,7 @@ export default function App() {
         finalUrl = `fb-messenger://share/?link=${shareUrl}`;
         break;
       case "email":
-        const emailSubject = encodeURIComponent(senderName ? `${senderName} sent you a beautiful Digital Flower!` : "A personalized flower gift for you");
+        const emailSubject = encodeURIComponent(senderName ? `${senderName} sent you a beautiful gift!` : "A personalized gift for you");
         finalUrl = `mailto:?subject=${emailSubject}&body=${textMsg}`;
         break;
       case "sms":
@@ -1489,7 +1516,7 @@ export default function App() {
                 <div className="bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-[44px] shadow-2xl overflow-hidden border border-slate-800 p-6 sm:p-10 relative text-white">
                   
                   {/* Music play notice button overlay banner */}
-                  {!isMusicPlaying && (
+                  {!isGiftOpened && (
                     <motion.div
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
@@ -1498,6 +1525,7 @@ export default function App() {
                       <GiftRevealBox
                         senderNameName={recipientGift.senderName}
                         onOpenComplete={() => {
+                          setIsGiftOpened(true);
                           setIsMusicPlaying(true);
                         }}
                       />
@@ -1522,7 +1550,7 @@ export default function App() {
                     <FlowerRenderer
                       flowerType={recipientGift.flowerType}
                       colorName={recipientGift.flowerColor}
-                      isBlooming={isMusicPlaying}
+                      isBlooming={isGiftOpened}
                     />
                   </div>
 

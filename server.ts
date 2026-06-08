@@ -1,12 +1,9 @@
 import express from "express";
 import path from "path";
 import { promises as fs } from "fs";
-import { fileURLToPath } from "url";
 import { createServer as createViteServer } from "vite";
 import { createClient } from "@supabase/supabase-js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 const GIFTS_FILE = path.join(process.cwd(), "gifts_db.json");
 
 interface Gift {
@@ -69,7 +66,17 @@ async function writeLocalAnalytics(events: AnalyticsEvent[]) {
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = Number(process.env.PORT) || 3000;
+
+  // Robust determination of production execution environment (checking node run context and dist)
+  const distIndexExists = await fs.access(path.join(process.cwd(), "dist", "index.html"))
+    .then(() => true)
+    .catch(() => false);
+
+  const isProd = process.env.NODE_ENV === "production" || 
+                 (distIndexExists && !process.argv.some(arg => arg.includes("server.ts")));
+
+  console.log(`[Express Portal] Runtime Environment Detection: isProduction = ${isProd} (distIndexExists=${distIndexExists}, argv=${JSON.stringify(process.argv)}, env.NODE_ENV=${process.env.NODE_ENV})`);
 
   // Body parser limit increase for sound recording uploads
   app.use(express.json({ limit: "15mb" }));
@@ -434,6 +441,14 @@ async function startServer() {
     res.json({ status: "ok", time: new Date().toISOString() });
   });
 
+  // Verification endpoint for deployment checks
+  app.get("/health", (req, res) => {
+    res.json({
+      status: "ok",
+      version: "2026-06-08T05:12:00Z"
+    });
+  });
+
   // Log client analytics events manually (e.g., share events)
   app.post("/api/analytics", async (req, res) => {
     try {
@@ -463,14 +478,31 @@ async function startServer() {
     }
   });
 
-  // Solve Vite dev server 404s by redirecting nested routes to root page with query parameters
-  app.get("/gift/:id", (req, res) => {
-    res.redirect(`/?giftId=${req.params.id}`);
+  // Serve the SPA shell directly on gift routes so the client can parse window.location.pathname natively
+  app.get(["/gift/:id", "/g/:id"], (req, res, next) => {
+    if (!isProd) {
+      req.url = "/";
+      next();
+    } else {
+      const distPath = path.join(process.cwd(), "dist");
+      res.sendFile(path.join(distPath, "index.html"));
+    }
   });
 
-  // Short path redirect for compact links
-  app.get("/g/:id", (req, res) => {
-    res.redirect(`/?giftId=${req.params.id}`);
+  // Background internal endpoint to sync gifts created on dev container to shared public container
+  app.post("/api/sync-gift", async (req, res) => {
+    try {
+      const gift: Gift = req.body;
+      if (!gift || !gift.id) {
+        return res.status(400).json({ error: "Invalid sync payload format" });
+      }
+      await saveGift(gift);
+      console.log(`[Sync Bridge Endpoint] Handled and successfully saved sync request for gift: ${gift.id}`);
+      res.json({ success: true });
+    } catch (err: any) {
+      console.warn(`[Sync Bridge Endpoint Warning] Failed to sync gift locally:`, err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Get a specific flower gift by ID
@@ -512,6 +544,33 @@ async function startServer() {
 
       await saveGift(newGift);
 
+      // --- DEVELOPMENT SYNC PIPELINE ---
+      // Replicate the gift to the public preview container so shared URLs do not break
+      const incomingHost = req.headers.host || "";
+      if (incomingHost.includes("ais-dev-")) {
+        const sharedHost = incomingHost.replace("ais-dev-", "ais-pre-");
+        const protocol = req.secure || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+        const syncUrl = `${protocol}://${sharedHost}/api/sync-gift`;
+
+        console.log(`[Sync Pipeline] Syncing dev-created gift ${id} to shared domain: ${syncUrl}`);
+        fetch(syncUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(newGift),
+        })
+          .then((response) => {
+            if (response.ok) {
+              console.log(`[Sync Pipeline] Successfully synced gift ${id} to ${sharedHost}`);
+            } else {
+              console.warn(`[Sync Pipeline] Failed to sync gift ${id}: Status ${response.status}`);
+            }
+          })
+          .catch((err) => {
+            console.warn(`[Sync Pipeline Exception] Could not sync database:`, err.message);
+          });
+      }
+      // ---------------------------------
+
       try {
         await logAnalyticsEvent("gift_created", id);
       } catch (e) {
@@ -544,6 +603,22 @@ async function startServer() {
       gift.paymentMethod = paymentMethod;
       await saveGift(gift);
 
+      // --- PAYMENT SYNCHRONIZATION BRIDGE ---
+      const incomingHost = req.headers.host || "";
+      if (incomingHost.includes("ais-dev-")) {
+        const sharedHost = incomingHost.replace("ais-dev-", "ais-pre-");
+        const protocol = req.secure || req.headers["x-forwarded-proto"] === "https" ? "https" : "http";
+        const syncUrl = `${protocol}://${sharedHost}/api/sync-gift`;
+
+        console.log(`[Sync Pipeline - Payment] Syncing paid status for gift ${id} to shared domain: ${syncUrl}`);
+        fetch(syncUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(gift),
+        }).catch((err) => console.warn(`[Sync Pipeline - Payment Exception]`, err.message));
+      }
+      // ----------------------------------------
+
       res.json(gift);
     } catch (err: any) {
       res.status(500).json({ error: err.message || "Egyptian integration gateway transaction fail" });
@@ -552,7 +627,7 @@ async function startServer() {
 
   // --- Dynamic Single Page App Hosting Router ---
 
-  if (process.env.NODE_ENV !== "production") {
+  if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
